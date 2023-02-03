@@ -8,58 +8,39 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader, SequentialSampler
 from transformers import AutoModelForTokenClassification
 import predict
-from utils import init_logger, load_tokenizer, get_labels
+from utils import init_logger, get_labels, findFirstSecond, MODEL_CLASSES
 import easydict
 import re
 WEEKDAY = {0:"월요일",1:"화요일",2:"수요일",3:"목요일",4:"금요일",5:"토요일",6:"일요일"}
 
-parser = argparse.ArgumentParser()
 
+# setting
+parser = argparse.ArgumentParser()
 parser.add_argument("--input_file", default="tel4.txt", type=str, help="Input file for prediction")
 parser.add_argument("--output_file", default="sample_pred_out.txt", type=str, help="Output file for prediction")
 parser.add_argument("--model_dir", default="./model", type=str, help="Path to save, load model")
-
+parser.add_argument("--tokenizer_dir", default="./tokenizer",type=str, help = "path to save, load tokenizer")
 parser.add_argument("--batch_size", default=32, type=int, help="Batch size for prediction")
 parser.add_argument("--no_cuda", action="store_true", help="Avoid using CUDA when available")
-
 pred_config = parser.parse_args()
 
-def findFirstSecond(arr):
-    second = first = -float('inf')
-    second_i = first_i = 0
-    for i,n in enumerate(arr):
-        if n > first:
-            second = first
-            first = n
-            second_i = first_i
-            first_i = i
-        elif second < n < first:
-            second = n
-            second_i = i
-    return first_i,second_i
-
-# pred_config = easydict.EasyDict({
-#     "input_file":"tel6_in.txt",
-#     "output_file":"tel6_out.txt",
-#     "model_dir":"./model",
-#     "batch_size":32,
-#     "no_cuda":"store_true"
-# })
-
+# trained setting load
 args = predict.get_args(pred_config)
 device = predict.get_device(pred_config)
 model = predict.load_model(pred_config, args, device)
 label_lst = get_labels(args)
-
 pad_token_label_id = torch.nn.CrossEntropyLoss().ignore_index
-tokenizer = load_tokenizer(args)
+tokenizer = MODEL_CLASSES[args.model_type][2].from_pretrained('./tokenizer')
+
+# input data processing
 lines = predict.read_input_file(pred_config)
 dataset = predict.convert_input_file_to_tensor_dataset(lines, pred_config, args, tokenizer, pad_token_label_id)
 sampler = SequentialSampler(dataset)
 data_loader = DataLoader(dataset, sampler=sampler, batch_size=pred_config.batch_size)
+
+# making output from loaded model
 all_slot_label_mask = None
 preds = None
-
 for batch in tqdm(data_loader, desc="Predicting"):
         batch = tuple(t.to(device) for t in batch)
         with torch.no_grad():
@@ -78,6 +59,7 @@ for batch in tqdm(data_loader, desc="Predicting"):
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 all_slot_label_mask = np.append(all_slot_label_mask, batch[3].detach().cpu().numpy(), axis=0)
         
+# choose top probability for entity in output
 first_pred = []
 second_pred = []
 for i in range(preds.shape[0]):
@@ -90,31 +72,11 @@ for i in range(preds.shape[0]):
 first_pred = np.array(first_pred)
 second_pred = np.array(second_pred)
 
-#최대만 찾기
 
-# slot_label_map = {i: label for i, label in enumerate(label_lst)}
-# preds_list = [[] for _ in range(first_pred.shape[0])]
-
-# for i in range(first_pred.shape[0]):
-#     for j in range(first_pred.shape[1]):
-#         if all_slot_label_mask[i, j] != pad_token_label_id:
-#             preds_list[i].append(slot_label_map[first_pred[i][j]])
-
-# 두번째만 찾기
-
-# slot_label_map = {i: label for i, label in enumerate(label_lst)}
-# preds_list = [[] for _ in range(second_pred.shape[0])]
-
-# for i in range(second_pred.shape[0]):
-#     for j in range(second_pred.shape[1]):
-#         if all_slot_label_mask[i, j] != pad_token_label_id:
-#             preds_list[i].append(slot_label_map[second_pred[i][j]])
-
-
-#1,2번째 큰 확률 다 반영
-
+# change probability to entity name
 slot_label_map = {i: label for i, label in enumerate(label_lst)}
 preds_list = [[] for _ in range(first_pred.shape[0])]
+for_loc_list = [[] for _ in range(first_pred.shape[0])]
 
 for i in range(first_pred.shape[0]):
     for j in range(first_pred.shape[1]):
@@ -123,27 +85,28 @@ for i in range(first_pred.shape[0]):
                 preds_list[i].append(slot_label_map[second_pred[i][j]])
             else:
                 preds_list[i].append(slot_label_map[first_pred[i][j]])
+                
+            if first_pred[i][j] not in [8,9,10,11,16,17] and second_pred[i][j] in [8,9,10,11,16,17]:
+                for_loc_list[i].append(slot_label_map[second_pred[i][j]])
+            else:
+                for_loc_list[i].append(slot_label_map[first_pred[i][j]])
 
+# date, time, loc entitiy classification
 date = []
 time = []
-date_time = {}
 loc = []
+date_time_loc = {}
 for i,wp in enumerate(zip(lines, preds_list)):
-            date_time[i] = []
+            date_time_loc[i] = []
             for j,(word, p) in enumerate(zip(wp[0], wp[1])):
-                #B-I를 같은 리스트에 담아서 연결성 up    ex) 내일 오전 어떠세요? 10시 좋아요
                 if p == 'DAT-B':
                     date.append(word)
-                    date_time[i].append(word)
                 elif p == 'DAT-I':
                     date.append(word)
-                    date_time[i].append(word)
                 elif p == 'TIM-B':
                     time.append(word)
-                    date_time[i].append(word)
                 elif p == 'TIM-I':
                     time.append(word)
-                    date_time[i].append(word)
                 elif p == 'LOC-B':
                     if preds_list[i][j-1] in ['ORG-B','LOC-B'] and loc != []:
                         loc[-1] = loc[-1] + " "+ word
@@ -160,11 +123,42 @@ for i,wp in enumerate(zip(lines, preds_list)):
                     loc[-1] = loc[-1] + " "+ word
                 elif (p == 'NUM-B'or p == 'NUM-I')and "시" in word:
                     time.append(word)
-                    date_time[i].append(word)
                 elif "반" in word and preds_list[i][j-1] in ['TIM-B','TIM-I']:
                     time.append(word)
-                
+                else:
+                    continue
+                date_time_loc[i].append(word)
 
+# additional search for loc
+second_loc = []
+if loc == []:
+    date_time_loc = {}
+    for i,wp in enumerate(zip(lines, for_loc_list)):
+            date_time_loc[i] = []
+            for j,(word, p) in enumerate(zip(wp[0], wp[1])):
+                if p in ['DAT-B','DAT-I','TIM-B','TIM-I'] or ((p == 'NUM-B'or p == 'NUM-I')and "시" in word) or ("반" in word and preds_list[i][j-1] in ['TIM-B','TIM-I']):
+                    date_time_loc[i].append(word)
+                    continue
+                elif p == 'LOC-B':
+                    if for_loc_list[i][j-1] in ['ORG-B','LOC-B'] and second_loc != []:
+                        second_loc[-1] = second_loc[-1] + " "+ word
+                    else:
+                        second_loc.append(word)
+                elif p == 'LOC-I':
+                    second_loc[-1] = second_loc[-1] + " "+ word
+                elif p == 'ORG-B':
+                    if for_loc_list[i][j-1] in ['ORG-B','LOC-B'] and loc != []:
+                        second_loc[-1] = second_loc[-1] + " "+ word
+                    else:
+                        second_loc.append(word)
+                elif p == 'ORG-I':
+                    second_loc[-1] = second_loc[-1] + " "+ word
+                else:
+                    continue
+                date_time_loc[i].append(word)
+                
+                
+# setting date,time as now
 now = datetime.now()
 year = now.year
 month = now.month
@@ -181,6 +175,7 @@ next_week = 0
 next_day = 0
 isWeekday= 0
 
+# time calculate
 for t in time:
     if "오전" in t:
         hour_sub = 1
@@ -237,7 +232,7 @@ if hour_back != 0:
     hour += hour_back
 
         
-
+#date calculate
 for d in date:
     if "다음주" in d or "다음 주" in d:
         next_week = 1
@@ -288,10 +283,24 @@ if isWeekday==1:
         day = int(now.day) + promise_week - weekday
     weekday = promise_week
         
+max_i = -1
+max = -1
+for i in range(len(date_time_loc)):
+    if max <= len(date_time_loc[i]):
+        max = len(date_time_loc[i])
+        max_i = i
+
+#location processing
+ignore = ['에서','라는']
 if loc == []:
     location = "미정"
+    for i in range(len(for_loc_list[max_i])):
+        if for_loc_list[max_i][i] in ['ORG-B','LOC-B']:
+            location = lines[max_i][i]
 else:
     location = loc[-1]
+for s in ignore:
+    location = re.sub(s,"",location)
 
 if day == now.day:
     if int(hour) < now.hour:
@@ -303,4 +312,7 @@ if next_day == 1 or next_week == 0:
 
 weekday = weekday % 7
 
+
+
+print("주요 통화 내용 : {} ".format(' '.join(s for s in lines[max_i])))
 print("약속 장소 : {} , 약속 시간 : {}년 {}월 {}일  {}시 {}분 ({})".format(location,year,month,day,hour,minute,WEEKDAY[weekday]))

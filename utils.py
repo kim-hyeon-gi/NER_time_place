@@ -47,6 +47,19 @@ def get_test_texts(args):
 
     return texts
 
+def findFirstSecond(arr):
+    second = first = -float('inf')
+    second_i = first_i = 0
+    for i,n in enumerate(arr):
+        if n > first:
+            second = first
+            first = n
+            second_i = first_i
+            first_i = i
+        elif second < n < first:
+            second = n
+            second_i = i
+    return first_i, second_i
 
 def get_labels(args):
     return [label.strip() for label in open(os.path.join(args.data_dir, args.label_file), 'r', encoding='utf-8')]

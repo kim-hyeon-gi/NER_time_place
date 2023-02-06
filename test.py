@@ -91,7 +91,7 @@ for i in range(first_pred.shape[0]):
             else:
                 for_loc_list[i].append(slot_label_map[first_pred[i][j]])
 
-# date, time, loc entitiy classification
+# date, time, loc entity classification
 date = []
 time = []
 loc = []
@@ -102,11 +102,17 @@ for i,wp in enumerate(zip(lines, preds_list)):
                 if p == 'DAT-B':
                     date.append(word)
                 elif p == 'DAT-I':
-                    date.append(word)
+                    if "뒤" in word or "후" in word:
+                        date[-1] = date[-1]+word
+                    else:
+                        date.append(word)
                 elif p == 'TIM-B':
                     time.append(word)
                 elif p == 'TIM-I':
-                    time.append(word)
+                    if "뒤" in word or "후" in word:
+                        time[-1] = time[-1]+word
+                    else:
+                        time.append(word)
                 elif p == 'LOC-B':
                     if preds_list[i][j-1] in ['ORG-B','LOC-B'] and loc != []:
                         loc[-1] = loc[-1] + " "+ word
@@ -125,6 +131,10 @@ for i,wp in enumerate(zip(lines, preds_list)):
                     time.append(word)
                 elif "반" in word and preds_list[i][j-1] in ['TIM-B','TIM-I']:
                     time.append(word)
+                elif "뒤" in word and preds_list[i][j-1] in ['TIM-B','TIM-I']:
+                    time[-1] = time[-1]+word
+                elif "후" in word and preds_list[i][j-1] in ['TIM-B','TIM-I']:
+                    time[-1] = time[-1]+word
                 else:
                     continue
                 date_time_loc[i].append(word)
@@ -183,10 +193,8 @@ for t in time:
         hour_sub = 2
     elif "뒤" in t:
         hour_back = re.sub(r'[^0-9]', '', t)
-        minute = now.minute
-    elif "후에" in t:
+    elif "후" in t:
         hour_back = re.sub(r'[^0-9]', '', t)
-        minute = now.minute
     elif "시" in t:
         if re.search('\d',t):
             hour = re.sub(r'[^0-9]', '', t)  
@@ -226,11 +234,6 @@ for t in time:
     elif "반" in t:
         minute = 30
 
-if hour_sub == 2 and hour_flag == 1:
-    hour += 12
-if hour_back != 0:
-    hour += hour_back
-
         
 #date calculate
 for d in date:
@@ -266,23 +269,36 @@ for d in date:
     elif "일요일" in d:
         promise_week = 5
         isWeekday = 1
-    elif "일" in d and re.search('\d',d):
-        day = re.sub(r'[^0-9]', '', d)
-        date_fix = 1
+    elif "후" in d:
+            if re.search('\d',d):
+                day += re.sub(r'[^0-9]', '', d)
+            elif "이틀" in d:
+                day += 2
+            elif "사흘" in d:
+                day += 3
+            elif "나흘" in d:
+                day += 4
+            next_day = 1
+    elif "일" in d:
+        if re.search('\d',d):
+            day = re.sub(r'[^0-9]', '', d)
+            date_fix = 1
     elif "월" in d and re.search('\d',d):
         month = re.sub(r'[^0-9]', '', d)
     elif "년" in d and re.search('\d',d):
         year = re.sub(r'[^0-9]', '', d)
         if year < 2023:
             year = 2023
-
 if isWeekday==1:
     if weekday > promise_week or next_week == 1:
         day = int(now.day) + promise_week - weekday + 7
     else:
         day = int(now.day) + promise_week - weekday
     weekday = promise_week
-        
+
+weekday = weekday % 7
+
+#location processing
 max_i = -1
 max = -1
 for i in range(len(date_time_loc)):
@@ -290,7 +306,6 @@ for i in range(len(date_time_loc)):
         max = len(date_time_loc[i])
         max_i = i
 
-#location processing
 ignore = ['에서','라는']
 if loc == []:
     location = "미정"
@@ -302,15 +317,23 @@ else:
 for s in ignore:
     location = re.sub(s,"",location)
 
+#time processing
+hour = int(hour)
+hour_back = int(hour_back)
+if hour_sub == 2 and hour_flag == 1:
+    hour += 12
+if hour_back != 0:
+    hour += hour_back
+
 if day == now.day:
-    if int(hour) < now.hour:
-        hour = int(hour) + 12
+    if hour < now.hour:
+        hour = hour + 12
 if next_day == 1 or next_week == 0:
-    if 0 < int(hour) < 6:
-        hour = int(hour) + 12
+    if 0 < hour < 6:
+        hour = hour + 12
 
 
-weekday = weekday % 7
+
 
 
 

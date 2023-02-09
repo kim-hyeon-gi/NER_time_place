@@ -2,7 +2,7 @@ import os
 import logging
 import argparse
 from tqdm import tqdm, trange
-from datetime import datetime
+import datetime
 import numpy as np
 import torch
 from torch.utils.data import TensorDataset, DataLoader, SequentialSampler
@@ -11,6 +11,7 @@ import predict
 from utils import init_logger, get_labels, findFirstSecond, MODEL_CLASSES
 import easydict
 import re
+import calendar
 WEEKDAY = {0:"월요일",1:"화요일",2:"수요일",3:"목요일",4:"금요일",5:"토요일",6:"일요일"}
 
 
@@ -169,7 +170,7 @@ if loc == []:
                 
                 
 # setting date,time as now
-now = datetime.now()
+now = datetime.datetime.now()
 year = now.year
 month = now.month
 day = now.day
@@ -332,10 +333,26 @@ if next_day == 1 or next_week == 0:
     if 0 < hour < 6:
         hour = hour + 12
 
+month_last_day = calendar.monthrange(year, month)[1]
 
+if minute >= 60:
+    minute %= 60
+    hour += 1
+if hour >=24 :
+    hour %= 24
+    day+=1
+if day > month_last_day:
+    day %= month_last_day
+    month+=1
+if month > 12 :
+    month %= 12
+    year+=1
+
+
+d = datetime.datetime(year,month,day,hour,minute)
 
 
 
 
 print("주요 통화 내용 : {} ".format(' '.join(s for s in lines[max_i])))
-print("약속 장소 : {} , 약속 시간 : {}년 {}월 {}일  {}시 {}분 ({})".format(location,year,month,day,hour,minute,WEEKDAY[weekday]))
+print("약속 장소 : {} , 약속 시간 : {}".format(location,d))

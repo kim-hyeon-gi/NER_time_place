@@ -76,7 +76,9 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
-
+.ipynb
+# data file
+datahub
 # IPython
 profile_default/
 ipython_config.py
@@ -127,7 +129,6 @@ venv.bak/
 .vscode/
 .idea/
 model/
-
 .DS_Store
 
 preds/
